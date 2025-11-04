@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cybersecurity Quiz — Auto Snap</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--accent:#007bff;--danger:#e74c3c}
+  html,body{height:100%;margin:0;font-family:'Poppins',sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center}
+  .card{background:#fff;padding:28px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.08);max-width:560px;width:94%}
+  h1{margin:0 0 8px}
+  .muted{color:#666;margin-top:6px}
+  .consent{background:#fffbe6;border-left:4px solid #ffd27a;padding:10px;border-radius:8px;margin-top:12px}
+  .button{width:100%;padding:14px;border-radius:8px;border:0;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;margin-top:16px}
+  #overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;justify-content:center;align-items:center;z-index:999}
+  .modal{background:#fff;padding:18px;border-radius:10px;width:92%;max-width:480px;text-align:center}
+  video,img{width:100%;border-radius:8px;margin-top:12px}
+  #result-text{margin-top:12px;font-weight:700;color:var(--danger)}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Cybersecurity Quiz</h1>
+    <p class="muted">What is 'phishing'?</p>
+    <div><label><input type="radio" name="q1"> A type of fishing sport</label></div>
+    <div><label><input type="radio" name="q1"> When hackers try to trick you into giving them your password</label></div>
+    <div><label><input type="radio" name="q1"> A computer virus that spreads through water</label></div>
+
+    <div class="consent">
+      <label><input type="checkbox" id="consent"> I understand and give permission for one photo to be taken and uploaded for this educational demo.</label>
+    </div>
+
+    <button class="button" id="submitButton">Submit & Start Verification</button>
+    <p class="muted">Serve this with a local server (e.g. <code>npx serve</code>) — don’t open via <code>file://</code>.</p>
+  </div>
+
+  <div id="overlay" aria-modal="true" role="dialog">
+    <div class="modal">
+      <h2>Verification — allow camera</h2>
+      <p class="muted">One photo will be taken immediately after you grant permission.</p>
+      <video id="camera-feed" autoplay playsinline style="display:none"></video>
+      <img id="captured-image" alt="Captured" style="display:none;border:3px solid var(--danger)">
+      <div id="result-text" style="display:none"></div>
+    </div>
+  </div>
+
+  <canvas id="canvas" style="display:none"></canvas>
+
+<script>
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxbcMPAqQeqQZIRnbAvlikNPHKnIMT5-JnO6KX4olfSQTOA_uOtwWAqDQCnPICZVP2B/exec';
+
+const submitBtn = document.getElementById('submitButton');
+const consentCheckbox = document.getElementById('consent');
+const overlay = document.getElementById('overlay');
+const videoEl = document.getElementById('camera-feed');
+const capturedImg = document.getElementById('captured-image');
+const canvas = document.getElementById('canvas');
+const resultText = document.getElementById('result-text');
+
+let stream = null;
+let snapped = false;
+
+submitBtn.addEventListener('click', async () => {
+  if (!consentCheckbox.checked) { alert('Please check the permission box first.'); return; }
+
+  overlay.style.display = 'flex';
+  resultText.style.display = 'none';
+  capturedImg.style.display = 'none';
+  videoEl.style.display = 'none';
+  snapped = false;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    videoEl.srcObject = stream;
+    videoEl.style.display = 'block';
+    await waitForVideoPlay(videoEl);
+    await takeAndUpload();
+  } catch (err) {
+    overlay.style.display = 'none';
+    alert('Camera access denied or unavailable: ' + err);
+  }
+});
+
+function waitForVideoPlay(video) {
+  return new Promise(resolve => {
+    if (video.readyState >= 2 && (video.videoWidth || video.videoHeight)) return resolve();
+    const onPlay = () => {
+      video.removeEventListener('playing', onPlay);
+      setTimeout(resolve, 120);
+    };
+    video.addEventListener('playing', onPlay);
+    setTimeout(resolve, 2000);
+  });
+}
+
+async function takeAndUpload() {
+  if (snapped) return;
+  snapped = true;
+
+  const w = videoEl.videoWidth || 640;
+  const h = videoEl.videoHeight || 480;
+  const maxW = 1024;
+  const scale = w > maxW ? maxW / w : 1;
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/png');
+
+  capturedImg.src = dataUrl;
+  capturedImg.style.display = 'block';
+  videoEl.style.display = 'none';
+
+  stopStream();
+
+  resultText.style.display = 'block';
+  resultText.textContent = 'Uploading your snapshot...';
+
+  try {
+    const form = new FormData();
+    form.append('image', dataUrl);
+
+    const res = await fetch(WEB_APP_URL, { method: 'POST', body: form });
+    const bodyText = await res.text();
+    let body = null;
+    try { body = JSON.parse(bodyText); } catch(e) { body = null; }
+
+    // Upload succeeded → show friendly message
+    if (body && body.success) {
+      resultText.textContent = "Thanks for the pic! You're awesome 😎";
+      // optional: reset page after 3 seconds
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        capturedImg.style.display = 'none';
+        resultText.style.display = 'none';
+        videoEl.style.display = 'none';
+      }, 3000);
+    } else {
+      resultText.textContent = "Upload failed — try again.";
+      console.warn('Server response:', bodyText);
+    }
+
+  } catch (err) {
+    resultText.textContent = 'Upload failed: ' + err;
+  }
+}
+
+function stopStream() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+}
+</script>
+
+</body>
+</html>
